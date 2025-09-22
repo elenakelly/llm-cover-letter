@@ -1,0 +1,1 @@
+Python, PyTorch, TensorFlow, Docker, Computer Vision, Mlops, Explainability & Objectivity & Objective-C & Functions & Processed & Deployed

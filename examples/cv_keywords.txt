@@ -1,0 +1,7 @@
+python
+pytorch
+tensorflow
+docker
+computer vision
+mlops
+explainability

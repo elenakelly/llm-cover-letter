@@ -1,0 +1,2 @@
+We are seeking a Machine Learning Engineer to build and deploy models for computer vision.
+You will own preprocessing, training in PyTorch/TensorFlow, and deployment with Docker.
