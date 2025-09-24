@@ -1,5 +1,4 @@
-- Python, pytorch, tensorflow, docker, computer vision, mlops, explainability, Python, Python & Python / Python  Python : Python - Python, Python ( Python ) /  Python ; Python..
-- Python _ _ Python = Python.
-- __ Python___ = Python_._ Python * Python.
-- * Python_ * Python – Python.
-- Python_   Python_ Python — Python.
+- Built and deployed models with PyTorch to production standards
+- Owned data preprocessing and feature engineering using TensorFlow
+- Improved training or inference workflows leveraging Docker
+- Collaborated with cross-functional teams and documented solutions in Computer Vision

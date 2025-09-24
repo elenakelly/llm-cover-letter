@@ -30,16 +30,15 @@ class LocalFLANT5(LLMProvider):
         pipe = self._load()
         res = pipe(
             prompt,
-            max_new_tokens=max_tokens,   # allow enough space
-            min_new_tokens=150,          # force more than one line
-            do_sample=False,             # deterministic
-            num_beams=5,                 # stronger planning
+            max_new_tokens=max_tokens,
+            min_new_tokens=150,
+            do_sample=False,
+            num_beams=5,
             early_stopping=True,
             no_repeat_ngram_size=3,
             clean_up_tokenization_spaces=True,
         )
         return (res[0].get("generated_text", "") if res else "").strip()
-
 
 
 
@@ -174,22 +173,94 @@ def split_sections(text: str):
 
     return "", ""
 
-def fallback_bullets_and_cover(jd: str, skills_csv: str):
-    # make 5 simple bullets from skill hits in the JD
-    import re
-    skills = [s.strip() for s in skills_csv.split(",") if s.strip()]
+import re
+from typing import List, Tuple
+
+def _titlecase_skill(s: str) -> str:
+    # Keep common ML casing
+    s = s.strip()
+    specials = {"pytorch":"PyTorch","tensorflow":"TensorFlow","nlp":"NLP","mlops":"MLOps","cv":"CV","xai":"XAI","sql":"SQL"}
+    low = s.lower()
+    return specials.get(low, s.title())
+
+def _pick_skills_for_jd(jd: str, skills_csv: str, k: int = 5) -> List[str]:
     jd_low = jd.lower()
+    skills = [x.strip() for x in skills_csv.split(",") if x.strip()]
+    # prefer skills that appear in JD
     hits = [s for s in skills if s.lower() in jd_low]
-    chosen = (hits[:5] or skills[:5])
-    bullets = "\n".join(f"- Applied {s} to deliver measurable outcomes in production" for s in chosen)
+    chose = hits[:k] or skills[:k]
+    # dedupe while preserving order
+    seen, out = set(), []
+    for s in chose:
+        key = s.lower()
+        if key not in seen:
+            seen.add(key)
+            out.append(_titlecase_skill(s))
+    return out
+
+def _limit_words(text: str, max_words: int) -> str:
+    words = text.split()
+    return " ".join(words[:max_words])
+
+def _fallback_bullets_and_cover(jd: str, skills_csv: str) -> Tuple[str, str]:
+    core = _pick_skills_for_jd(jd, skills_csv, k=5)
+    # Generic impact verbs that are safe (no fake numbers)
+    patterns = [
+        "Built and deployed models with {s} to production standards",
+        "Owned data preprocessing and feature engineering using {s}",
+        "Improved training or inference workflows leveraging {s}",
+        "Collaborated with cross-functional teams and documented solutions in {s}",
+        "Containerized workflows and ensured reproducibility with {s}",
+    ]
+    # Map some skills to nicer phrases in a pinch
+    nice = {
+        "MLOps": "MLOps/CI/CD",
+        "CV": "computer vision",
+    }
+    bullets_list = []
+    for i, s in enumerate(core):
+        phrase = nice.get(s, s)
+        text = patterns[i % len(patterns)].format(s=phrase)
+        bullets_list.append(f"- {_limit_words(text, 20)}")
 
     cover = (
-        "I am excited to apply my experience in {skills} to your needs. I have built and deployed models, "
-        "owned data preprocessing and feature engineering, and collaborated with cross-functional teams to deliver "
-        "reliable systems. I focus on clarity, reproducibility, and measurable impact, and I enjoy translating complex "
-        "requirements into simple, maintainable solutions. I would welcome the chance to contribute to your team."
-    ).format(skills=", ".join(chosen[:4]))
-    return bullets, cover
+        "I am excited to apply my experience in {skills} to your machine learning needs. "
+        "I have delivered production-ready models, built reliable data preprocessing and feature engineering pipelines, "
+        "and collaborated closely with stakeholders to ship maintainable solutions. I focus on clarity, "
+        "reproducibility, and measurable outcomes, and I’m comfortable working across training, evaluation, "
+        "and containerized deployment. I’m eager to contribute that mindset and momentum to your team."
+    ).format(skills=", ".join(core[:4]))
+
+    # enforce 120–150 words
+    words = cover.split()
+    if len(words) < 120:
+        cover += " I also value readable code, version control, and thoughtful documentation to support team velocity."
+    cover = " ".join(cover.split())  # normalize spaces
+    return "\n".join(bullets_list), cover
+
+def _looks_bad(text: str) -> bool:
+    """Heuristic: too short, repeated tokens, or mostly punctuation."""
+    if not text or len(text.strip()) < 40:
+        return True
+    # repeated single token like 'Python' many times
+    top = re.findall(r"\b([A-Za-z][A-Za-z0-9#+.-]{0,20})\b", text)
+    if top:
+        from collections import Counter
+        c = Counter(w.lower() for w in top)
+        if c.most_common(1)[0][1] >= max(6, int(len(top) * 0.25)):
+            return True
+    # punctuation density
+    punct = len(re.findall(r"[^A-Za-z0-9\s]", text))
+    if punct > len(text) * 0.25:
+        return True
+    return False
+
+def _parse_or_fallback(raw: str, jd: str, skills_csv: str) -> Tuple[str, str]:
+    # Try your existing split first
+    b, c = split_sections(raw)
+    if (not b or not c) or _looks_bad(b + " " + c):
+        return _fallback_bullets_and_cover(jd, skills_csv)
+    return b, c
 
 
 def run(jd_path, cv_path, provider_name, model):
@@ -198,18 +269,16 @@ def run(jd_path, cv_path, provider_name, model):
     provider = make_provider(provider_name, model)
     print(Panel.fit(f"Provider: [bold]{provider.name}[/] | Model: [bold]{provider.model}[/]"))
     out = provider.generate(prompt, max_tokens=400)
-    # Always save raw output for debugging/parsing
+
+    # Always save raw
     Path("outputs").mkdir(exist_ok=True)
     Path("outputs/raw.txt").write_text(out, encoding="utf-8")
 
-    bullets, cover = split_sections(out)
-    if not bullets or not cover:
-        # fallback so we always produce something useful
-        fb_bullets, fb_cover = fallback_bullets_and_cover(jd, skills)
-        bullets = bullets or fb_bullets
-        cover = cover or fb_cover
+    # Robust parse (falls back to deterministic writer if needed)
+    bullets, cover = _parse_or_fallback(out, jd, skills)
 
     save_outputs(bullets or "", cover or "")
+
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
